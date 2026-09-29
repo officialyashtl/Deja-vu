@@ -96,39 +96,70 @@ uvicorn main:app --host 0.0.0.0 --port 8000 --reload
     "category": "Access Control"
   },
   "severity": "High",
-  "ai_analysis": "This finding indicates a potential risk in access management...",
+  "ai_analysis": "This finding indicates a potential risk...",
+  "ai_recommendation": "Implement an automated workflow...",
+  "why_relevant": "The historical finding shares the same root cause...",
+
   "historical_match": {
-    "id": "eff097f3-a4f7-4103-862a-f49ac19cd0a1",
-    "text": "Finding A-021 (delayed access revocation) was resolved by implementing an automated employee offboarding workflow.",
-    "scores": {
-      "final": 1.0997,
-      "semantic": 0.8320,
-      "reranker": 0.9997,
-      "keyword": 0.9000
-    },
+    "id": "eff097f3-...",
+    "text": "Finding A-021 (delayed access revocation) was resolved...",
+    "scores": { "final": 1.0997, "semantic": 0.8320, "reranker": 0.9997, "keyword": 0.9000 },
     "occurred_at": "2026-09-29T10:17:57.561557+00:00",
-    "document_id": "c1cd67f4-44ce-4beb-8cff-fbe39d4f92a3",
+    "document_id": "c1cd67f4-...",
     "entities": null,
     "context": null,
     "chunk_id": "default~5Fbank_c1cd67f4-..._0"
   },
   "match_strength": "High Match",
   "previous_resolution": "Extracted from historical match.",
-  "why_relevant": "The historical finding shares the same root cause and category.",
-  "ai_recommendation": "Implement an automated workflow that triggers immediately upon HR offboarding..."
+
+  "historical_matches": [
+    {
+      "id": "eff097f3-...",
+      "text": "Finding A-021 ...",
+      "scores": { "final": 1.0997, "semantic": 0.8320, "reranker": 0.9997, "keyword": 0.9000 },
+      "occurred_at": "2026-09-29T10:17:57.561557+00:00",
+      "document_id": "c1cd67f4-...",
+      "entities": null,
+      "context": null,
+      "chunk_id": "..."
+    }
+  ],
+
+  "learning_context": {
+    "memory_used": true,
+    "historical_memories_retrieved": 14
+  },
+
+  "precedent_status": "Reliable precedent found",
+
+  "what_changed": {
+    "same_category": true,
+    "same_root_cause": null,
+    "current_status": "Open",
+    "historical_status": "Resolved",
+    "previous_resolution": "Extracted from historical match.",
+    "summary": "Current finding '...' (Access Control) compared against historical precedent..."
+  }
 }
 ```
 
-**`match_strength` derivation** (from real Hindsight `semantic` score):
-| Score | Label |
-|---|---|
-| >= 0.90 | "Very High Match" |
-| >= 0.75 | "High Match" |
-| >= 0.55 | "Moderate Match" |
-| < 0.55 | "Low Match" |
+#### Field Reference
 
-> `historical_match` is a fully structured JSON object — **not a string**.
-> All fields come directly from the real Hindsight `RecallResult` SDK object.
+| Field | Description |
+|---|---|
+| `historical_match` | Primary/strongest Hindsight recall result. Always a structured JSON object. Backward-compatible. |
+| `match_strength` | Human label derived from `historical_match.scores.semantic`: `"Very High Match" / "High Match" / "Moderate Match" / "Low Match"` |
+| `historical_matches` | All relevant results returned by Hindsight recall (`budget=high`), ranked by final score. Each item has the same shape as `historical_match`. |
+| `learning_context.memory_used` | `true` if Hindsight returned at least one result. |
+| `learning_context.historical_memories_retrieved` | Exact count of `RecallResult` items returned from real Hindsight recall (`budget=high`). Represents memories retrieved, not AI decisions made. Never fabricated. |
+| `precedent_status` | `"Reliable precedent found"` when best semantic score >= 0.75; else `"No reliable precedent found"`. |
+| `what_changed.same_category` | `true/false` inferred from whether the current `category` string appears in the top Hindsight match text. `RecallResult` has no dedicated category field — this is a text-based inference. `null` when no reliable precedent. |
+| `what_changed.same_root_cause` | Always `null`. Root cause is not a discrete field in the Hindsight SDK. |
+| `what_changed.current_status` | Always `"Open"` (the submitted finding is by definition unresolved). |
+| `what_changed.historical_status` | `"Resolved"` or `"Open"` extracted from the Hindsight memory text. `null` when no reliable precedent. |
+| `what_changed.previous_resolution` | Extracted from Hindsight memory text. `null` when no reliable precedent. |
+| `what_changed.summary` | Factual narrative comparing current vs. historical. Uses only available data. |
 
 ---
 

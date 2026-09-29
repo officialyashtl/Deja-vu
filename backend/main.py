@@ -192,34 +192,114 @@ def get_findings():
 @app.post("/analyze")
 async def analyze_finding(req: AnalyzeRequest):
     query = f"{req.title} {req.category}"
-    historical_match = None
-    previous_resolution = None
-    match_strength = None
 
-    # Real Hindsight recall — extract structured fields from SDK objects
+    # ------------------------------------------------------------------
+    # Feature 1 — Cumulative Learning: fetch multiple results from Hindsight
+    # budget='high' asks Hindsight for a larger result set.
+    # ------------------------------------------------------------------
+    raw_results = []
     try:
-        results = await hindsight_client.arecall(bank_id=HINDSIGHT_BANK_ID, query=query)
-
-        raw_match = None
-        if hasattr(results, "results") and len(results.results) > 0:
-            raw_match = results.results[0]
-        elif isinstance(results, list) and len(results) > 0:
-            raw_match = results[0]
-
-        if raw_match is not None:
-            historical_match = _serialize_recall_result(raw_match)
-            # Derive match_strength from the actual semantic score
-            semantic_score = (
-                historical_match.get("scores", {}) or {}
-            ).get("semantic")
-            match_strength = _match_strength(semantic_score)
-
+        recall_response = await hindsight_client.arecall(
+            bank_id=HINDSIGHT_BANK_ID, query=query, budget="high"
+        )
+        if hasattr(recall_response, "results"):
+            raw_results = recall_response.results or []
+        elif isinstance(recall_response, list):
+            raw_results = recall_response
     except Exception as e:
         print(f"Hindsight arecall failed: {e}")
 
-    if not previous_resolution and historical_match:
-        previous_resolution = "Extracted from historical match."
+    # Serialize all results into structured dicts
+    historical_matches = [_serialize_recall_result(r) for r in raw_results]
 
+    # Primary match = strongest result (Hindsight returns results ranked by final score)
+    historical_match = historical_matches[0] if historical_matches else None
+
+    # ------------------------------------------------------------------
+    # Feature 2 — Learning Context: counts come from real Hindsight results
+    # ------------------------------------------------------------------
+    decisions_used = len(historical_matches)
+    learning_context = {
+        "memory_used": decisions_used > 0,
+        "historical_memories_retrieved": decisions_used,
+    }
+
+    # ------------------------------------------------------------------
+    # Feature 3 — Precedent Status: threshold from real semantic score
+    # "reliable" = High Match or better (semantic >= 0.75)
+    # ------------------------------------------------------------------
+    primary_semantic = None
+    if historical_match:
+        primary_semantic = (historical_match.get("scores") or {}).get("semantic")
+
+    match_strength = _match_strength(primary_semantic)
+    reliable = match_strength in ("Very High Match", "High Match")
+    precedent_status = (
+        "Reliable precedent found" if reliable else "No reliable precedent found"
+    )
+
+    # ------------------------------------------------------------------
+    # Feature 4 — What Changed?: compare current finding vs. primary match
+    # Only use fields that genuinely exist on the data structures.
+    # ------------------------------------------------------------------
+    if reliable and historical_match:
+        matched_text = historical_match.get("text") or ""
+
+        # same_category: compare req.category against the matched text
+        # (RecallResult has no dedicated category field; we check the text)
+        same_category = req.category.lower() in matched_text.lower() if matched_text else None
+
+        # historical_status: Hindsight stores "Status: Resolved" in the retained text
+        historical_status = None
+        if "resolved" in matched_text.lower():
+            historical_status = "Resolved"
+        elif "open" in matched_text.lower():
+            historical_status = "Open"
+
+        # previous_resolution: extract "Resolution: ..." from the matched text when present
+        previous_resolution_text = None
+        if "resolution:" in matched_text.lower():
+            for part in matched_text.split("."):
+                if "resolution" in part.lower():
+                    previous_resolution_text = part.strip()
+                    break
+        if not previous_resolution_text:
+            previous_resolution_text = "Extracted from historical match."
+
+        what_changed = {
+            "same_category": same_category,
+            "same_root_cause": None,  # root cause is not a discrete SDK field
+            "current_status": "Open",
+            "historical_status": historical_status,
+            "previous_resolution": previous_resolution_text,
+            "summary": (
+                f"Current finding '{req.title}' ({req.category}) compared against "
+                f"historical precedent. "
+                + (
+                    f"Category match: {'yes' if same_category else 'no'}. "
+                    if same_category is not None else ""
+                )
+                + (
+                    f"Historical outcome: {historical_status}. " if historical_status else ""
+                )
+                + "Root cause comparison not available from stored memory text."
+            ),
+        }
+        previous_resolution = previous_resolution_text
+    else:
+        what_changed = {
+            "same_category": None,
+            "same_root_cause": None,
+            "current_status": "Open",
+            "historical_status": None,
+            "previous_resolution": None,
+            "summary": "No reliable historical precedent was found for comparison.",
+        }
+        previous_resolution = None
+
+    # ------------------------------------------------------------------
+    # Static analysis fields (preserved from original)
+    # ------------------------------------------------------------------
     ai_analysis = (
         "This finding indicates a potential risk in access management. "
         "When employee access is not revoked promptly, it can lead to "
@@ -233,6 +313,8 @@ async def analyze_finding(req: AnalyzeRequest):
     why_relevant = (
         "The historical finding shares the same root cause and category. "
         "The previous resolution successfully addressed this."
+        if reliable
+        else "No reliable precedent was found. Manual review recommended."
     )
 
     try:
@@ -259,11 +341,20 @@ async def analyze_finding(req: AnalyzeRequest):
         "current_finding": req.model_dump(),
         "severity": severity,
         "ai_analysis": ai_analysis,
+        # --- backward-compatible primary match ---
         "historical_match": historical_match,
         "match_strength": match_strength,
         "previous_resolution": previous_resolution,
         "why_relevant": why_relevant,
         "ai_recommendation": ai_recommendation,
+        # --- Feature 1: cumulative list ---
+        "historical_matches": historical_matches,
+        # --- Feature 2: learning context ---
+        "learning_context": learning_context,
+        # --- Feature 3: precedent status ---
+        "precedent_status": precedent_status,
+        # --- Feature 4: what changed ---
+        "what_changed": what_changed,
     }
 
 
