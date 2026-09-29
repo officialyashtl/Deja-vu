@@ -1,46 +1,48 @@
 # AuditTrail AI Backend
 
-This is the FastAPI backend for the AuditTrail AI system, integrating directly with the real Hindsight SDK for long-term agent memory.
+FastAPI backend for AuditTrail AI, integrating with the real Hindsight SDK for long-term agent memory.
 
 ## Setup & Requirements
 
-1. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-2. Start the Hindsight memory server using Docker (with Groq LLM configuration):
-   ```bash
-   docker run -d --pull always --name hindsight \
-     -p 8888:8888 -p 9999:9999 \
-     -e HINDSIGHT_API_LLM_PROVIDER=groq \
-     -e HINDSIGHT_API_LLM_MODEL=openai/gpt-oss-120b \
-     -e HINDSIGHT_API_LLM_GROQ_SERVICE_TIER=on_demand \
-     -e HINDSIGHT_API_LLM_API_KEY=gsk_your_groq_api_key \
-     -v $HOME/.hindsight-docker:/home/hindsight/.pg0 \
-     ghcr.io/vectorize-io/hindsight:latest
-   ```
+```bash
+pip install -r requirements.txt
+```
 
-## Environment Variables
+## Hindsight Docker Startup (Groq)
 
-Create a `.env` file in the `backend/` directory or export these variables:
-- `OPENAI_API_KEY`: Used for the analysis AI (fallback to "dummy_openai_key" if not set).
-- `HINDSIGHT_BASE_URL`: The URL of the Hindsight API (defaults to `http://localhost:8888`).
-- `HINDSIGHT_API_KEY`: The API key for Hindsight if authentication is configured (defaults to "dummy_key").
-- `HINDSIGHT_BANK_ID`: The Memory Bank ID to use (defaults to "default_bank").
+```bash
+docker run -d --pull always --name hindsight \
+  -p 8888:8888 -p 9999:9999 \
+  -e HINDSIGHT_API_LLM_PROVIDER=groq \
+  -e HINDSIGHT_API_LLM_MODEL=openai/gpt-oss-120b \
+  -e HINDSIGHT_API_LLM_GROQ_SERVICE_TIER=on_demand \
+  -e HINDSIGHT_API_LLM_API_KEY=gsk_your_groq_api_key \
+  -v $HOME/.hindsight-docker:/home/hindsight/.pg0 \
+  ghcr.io/vectorize-io/hindsight:latest
+```
 
-## Startup Command
+## Backend Startup
 
-To start the backend server with hot-reloading for development:
 ```bash
 uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 ```
-*Note: The frontend base API URL should be configured to point to `http://localhost:8000`.*
 
-## API Endpoints & Request/Response Shapes
+**Frontend base API URL: `http://localhost:8000`**
 
-### 1. `GET /health`
-Returns the health status and the base URL of the connected Hindsight instance.
-**Response:**
+## Environment Variables
+
+| Variable | Default | Notes |
+|---|---|---|
+| `HINDSIGHT_BASE_URL` | `http://localhost:8888` | Hindsight API |
+| `HINDSIGHT_API_KEY` | `dummy_key` | Leave as-is for local no-auth setup |
+| `HINDSIGHT_BANK_ID` | `default_bank` | Memory bank namespace |
+| `OPENAI_API_KEY` | `dummy_openai_key` | Optional; only used if real key is set |
+
+---
+
+## API Endpoints
+
+### `GET /health`
 ```json
 {
   "status": "ok",
@@ -49,9 +51,9 @@ Returns the health status and the base URL of the connected Hindsight instance.
 }
 ```
 
-### 2. `GET /findings`
-Returns the demo open finding and historical findings.
-**Response:**
+---
+
+### `GET /findings`
 ```json
 {
   "demo_finding": {
@@ -72,9 +74,11 @@ Returns the demo open finding and historical findings.
 }
 ```
 
-### 3. `POST /analyze`
-Analyzes a new audit finding, performing a semantic recall via Hindsight to find historical matches.
-**Request Shape:**
+---
+
+### `POST /analyze`
+
+**Request:**
 ```json
 {
   "finding_id": "A-107",
@@ -82,7 +86,8 @@ Analyzes a new audit finding, performing a semantic recall via Hindsight to find
   "category": "Access Control"
 }
 ```
-**Response Shape:**
+
+**Response:**
 ```json
 {
   "current_finding": {
@@ -91,40 +96,89 @@ Analyzes a new audit finding, performing a semantic recall via Hindsight to find
     "category": "Access Control"
   },
   "severity": "High",
-  "ai_analysis": "This finding indicates a potential risk...",
-  "historical_match": "id='faa167bc-5dfa-4fb2-a587-8576f3cec8e1' text='Finding A-021 (delayed access revocation) was resolved...'",
+  "ai_analysis": "This finding indicates a potential risk in access management...",
+  "historical_match": {
+    "id": "eff097f3-a4f7-4103-862a-f49ac19cd0a1",
+    "text": "Finding A-021 (delayed access revocation) was resolved by implementing an automated employee offboarding workflow.",
+    "scores": {
+      "final": 1.0997,
+      "semantic": 0.8320,
+      "reranker": 0.9997,
+      "keyword": 0.9000
+    },
+    "occurred_at": "2026-09-29T10:17:57.561557+00:00",
+    "document_id": "c1cd67f4-44ce-4beb-8cff-fbe39d4f92a3",
+    "entities": null,
+    "context": null,
+    "chunk_id": "default~5Fbank_c1cd67f4-..._0"
+  },
+  "match_strength": "High Match",
   "previous_resolution": "Extracted from historical match.",
-  "why_relevant": "The historical finding shares the same root cause...",
-  "ai_recommendation": "Implement an automated workflow..."
+  "why_relevant": "The historical finding shares the same root cause and category.",
+  "ai_recommendation": "Implement an automated workflow that triggers immediately upon HR offboarding..."
 }
 ```
 
-### 4. `POST /resolve`
-Marks a finding as resolved and retains the resolution in Hindsight memory.
-**Request Shape:**
+**`match_strength` derivation** (from real Hindsight `semantic` score):
+| Score | Label |
+|---|---|
+| >= 0.90 | "Very High Match" |
+| >= 0.75 | "High Match" |
+| >= 0.55 | "Moderate Match" |
+| < 0.55 | "Low Match" |
+
+> `historical_match` is a fully structured JSON object — **not a string**.
+> All fields come directly from the real Hindsight `RecallResult` SDK object.
+
+---
+
+### `POST /resolve`
+
+**Request:**
 ```json
 {
   "finding_id": "A-107",
   "resolution": "Automated workflow integrated with HR system",
-  "status": "Resolved"
+  "status": "Resolved",
+  "resolved_by": "auditor"
 }
 ```
+`resolved_by` is optional — defaults to `"auditor"`.
+
 **Response:**
 ```json
 {
   "status": "success",
-  "message": "Resolution retained in real Hindsight."
+  "message": "Resolution retained in real Hindsight.",
+  "resolved_at": "2026-09-29T10:20:06.571824+00:00",
+  "resolved_by": "auditor"
 }
 ```
 
-### 5. `GET /memory`
-Lists all memories currently stored in the active Hindsight memory bank.
-**Response Shape:**
+> The stored Hindsight content includes finding ID, resolution text, resolver identity, and ISO timestamp.
+
+---
+
+### `GET /memory`
 ```json
 {
   "memories": [
-    "id='af3d787c-3dae-4d3e-bc5b-8729f7763aaf' text='Finding A-032...'",
-    "id='faa167bc-5dfa-4fb2-a587-8576f3cec8e1' text='Finding A-021...'"
-  ]
+    {
+      "id": "ea3db910-8436-4a48-9e87-77ee4847cf10",
+      "text": "Finding A-108 was resolved by the auditor...",
+      "occurred_at": "2026-09-29T10:19:21.780622+00:00",
+      "document_id": "62da1fc1-7899-4f74-ac51-e0f3f7376fa6",
+      "entities": "Finding A-107, vulnerability, auditor",
+      "state": "valid",
+      "proof_count": 1,
+      "fact_type": "world",
+      "tags": [],
+      "chunk_id": "default~5Fbank_62da1fc1-..._0"
+    }
+  ],
+  "total": 8
 }
 ```
+
+> Memory items are fully structured JSON objects — **not strings**.
+> All fields come directly from the real Hindsight `MemoryUnitListItem` SDK object.
