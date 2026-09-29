@@ -12,7 +12,7 @@ const severityConfig: Record<Severity, { label: string; className: string }> = {
 };
 
 export function SeverityBadge({ severity }: SeverityBadgeProps) {
-  const cfg = severityConfig[severity];
+  const cfg = severityConfig[severity] || { label: 'Unknown', className: 'badge-medium' };
   return <span className={`badge ${cfg.className}`}>{cfg.label}</span>;
 }
 
